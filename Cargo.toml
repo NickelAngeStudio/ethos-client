@@ -7,4 +7,9 @@ description = "Ethos Client connection"
 license = "MIT"
 repository = "https://github.com/NickelAngeStudio/ethos-client"
 
+exclude = [
+    "ports/*"
+]
+
+
 [dependencies]
