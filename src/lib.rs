@@ -1,14 +1,24 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::io::prelude::*;
+    use std::net::TcpStream;
 
     #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+    fn connection() {
+        match create_connection(){
+            Ok(_) => {},
+            Err(_) => panic!("Connection error"),
+        }
+    }
+
+    fn create_connection()  -> std::io::Result<()> {
+        let mut stream = TcpStream::connect("127.0.0.1:3847")?;
+
+        //stream.write(&[1])?;
+        //stream.read(&mut [0; 128])?;
+
+        Ok(())
     }
 }
