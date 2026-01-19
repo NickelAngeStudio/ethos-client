@@ -1,0 +1,10 @@
+[package]
+name = "ethos-client"
+version = "0.0.0"
+edition = "2024"
+authors = ["NickelAnge.Studio <rust@nickelange.studio>"]
+description = "Ethos Client connection"
+license = "MIT"
+repository = "https://github.com/NickelAngeStudio/ethos-client"
+
+[dependencies]
