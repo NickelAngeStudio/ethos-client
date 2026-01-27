@@ -13,3 +13,4 @@ exclude = [
 
 
 [dependencies]
+ethos-core = { path = "../ethos-core", version = "0.0.0"  }

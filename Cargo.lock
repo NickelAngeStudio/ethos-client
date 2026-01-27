@@ -5,3 +5,10 @@ version = 4
 [[package]]
 name = "ethos-client"
 version = "0.0.0"
+dependencies = [
+ "ethos-core",
+]
+
+[[package]]
+name = "ethos-core"
+version = "0.0.0"
