@@ -27,7 +27,7 @@ mod tests {
     use std::io::prelude::*;
     use std::net::TcpStream;
 
-    use ethos_core::ETHOS_TCP_PORT;
+    use ethos_core::net::{ClientMessage, TCP_PORT};
 
     #[test]
     fn connection() {
@@ -38,16 +38,23 @@ mod tests {
     }
 
     fn create_connection()  -> std::io::Result<()> {
-        let connect_string = format!("127.0.0.1:{}", ETHOS_TCP_PORT);
+        let connect_string = format!("127.0.0.1:{}", TCP_PORT);
         let buf =  &mut [0 as u8; 128];
         let mut stream = TcpStream::connect(connect_string)?;
+        let mut count : u32 = 0;
 
         loop {
-            buf[0] += 1;
-            if buf[0]>= 255{
-                buf[0] = 0;
+            if count < 10 {
+                let msg = ClientMessage::new(ethos_core::net::ClientPayload::Key { key: 123 + count as u128 });
+                match msg.pack_bytes(buf){
+                    Ok(size) => {
+                        println!("SIZE={}, Buf={:?}", size, buf);
+                        stream.write(&buf[0..size]).unwrap();
+                    },
+                    Err(_) => panic!("Pack err"),
+                }
+                count += 1;
             }
-            stream.write(&buf[0..8])?;
         }
 
         
