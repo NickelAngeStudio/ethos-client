@@ -22,10 +22,20 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#[doc(hidden)]
-pub mod client;
 
-pub use client::error::Error as Error;
-pub use client::EthosNetClient as EthosNetClient;
-pub use client::EthosNetClientStatus as EthosNetClientStatus;
-pub use client::message::EthosNetClientUpdate as EthosNetClientUpdate;
+//! EthosNetClient unit tests
+//! V1 : Create a new EthosNetClient
+//! V2 : Connect EthosNetClient to server
+//! V : client_message can receive message
+//! V : Incorrect connection string should give InvalidConnectionString 
+//! V : Correct connection string should give Ok(())
+//! V : Incorrect connection then correct connection should work.
+//! V : Trying to connect twice give ClientAlreadyConnected
+//! V : Close connection give ClientDisconnected when disconnected
+//! V : Close connection give Ok(()) when connected
+//! V : send_message give ClientDisconnected when disconnected
+//! V : send_message send a message successfully
+//! V : server_message give ClientDisconnected when disconnected
+//! V : server_message receive None when no message
+//! V : server_message receive Some(ServerMessage)
+//! V : update join handle.

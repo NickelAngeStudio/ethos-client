@@ -22,10 +22,27 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#[doc(hidden)]
-pub mod client;
+use ethos_core::net::{ClientMessage, ServerMessage};
 
-pub use client::error::Error as Error;
-pub use client::EthosNetClient as EthosNetClient;
-pub use client::EthosNetClientStatus as EthosNetClientStatus;
-pub use client::message::EthosNetClientUpdate as EthosNetClientUpdate;
+use crate::{Error as ClientError, EthosNetClientStatus};
+
+
+/// Client to thread message
+pub enum CtoTMessage {
+    Message(ClientMessage),
+    CloseConnection,
+}
+
+/// Thread to client update
+pub enum EthosNetClientUpdate {
+    /// An error occurred
+    Error(ClientError),
+
+    /// Client status changed
+    StatusChanged(EthosNetClientStatus),
+}
+
+/// Server to client message wrapper
+pub enum StoCMessage {
+    Message(ServerMessage),
+}

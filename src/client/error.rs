@@ -22,10 +22,16 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#[doc(hidden)]
-pub mod client;
+/// Possible [EthosNetClient](crate::EthosNetClient) error.
+pub enum Error {
+    /// Happens when trying to do action while client is disconnected
+    ClientDisconnected,
 
-pub use client::error::Error as Error;
-pub use client::EthosNetClient as EthosNetClient;
-pub use client::EthosNetClientStatus as EthosNetClientStatus;
-pub use client::message::EthosNetClientUpdate as EthosNetClientUpdate;
+    /// Invalid connection string given.
+    InvalidConnectionString,
+
+    /// Client is already connected
+    ClientAlreadyConnected,
+
+
+}

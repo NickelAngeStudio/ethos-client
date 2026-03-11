@@ -30,6 +30,7 @@ name = "ethos-core"
 version = "0.0.0"
 dependencies = [
  "concat-idents",
+ "nscfg",
  "tampon",
 ]
 
@@ -50,6 +51,12 @@ name = "libc"
 version = "0.2.180"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bcc35a38544a891a5f7c865aca548a982ccb3b8650a5b06d0fd33a10283c56fc"
+
+[[package]]
+name = "nscfg"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0718a42ff0847176d985480d117b3d486ede5d915e506388f6a35d34fa7494c2"
 
 [[package]]
 name = "ppv-lite86"
