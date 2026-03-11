@@ -22,12 +22,26 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-use crate::EthosNetClient;
+use std::{net::TcpStream, sync::mpsc::{Receiver, Sender}};
+
+use debug_print::debug_eprintln;
+use ethos_core::net::SERVER_MSG_BUFFER_SIZE;
+use crate::Error as ClientError;
+
+use crate::{EthosNetClient, EthosNetClientUpdate, client::message::{CtoTMessage, StoCMessage}};
+
+/// Client thread parameters
+pub(crate) struct ClientThread {
+    pub(crate)  connect_string : String, 
+    pub(crate)  rcv_ctot : Receiver<CtoTMessage>, 
+    pub(crate)  sdr_ttoc : Sender<EthosNetClientUpdate>, 
+    pub(crate)  sdr_stoc : Sender<StoCMessage>
+}
 
 impl EthosNetClient {
 
-    /*
-    fn handle_client_thread(connect_string : String, mut rcv_ctot : Receiver<CtoTMessage>, mut sdr_ttoc : Sender<TtoCMessage>) -> usize {
+    
+    pub(super) fn handle_client_thread(mut ct : ClientThread) {
 
         // Put buffer on heap
         let mut buffer = Vec::<u8>::new();
@@ -36,9 +50,11 @@ impl EthosNetClient {
         // Return value
         let mut return_value : usize = 0;
 
-        match TcpStream::connect(connect_string){
+        match TcpStream::connect(ct.connect_string.clone()){
             Ok(mut stream) => {
                 stream.set_nonblocking(true).unwrap();
+
+                /*
                 sdr_ttoc.send(TtoCMessage::Connected).unwrap();
 
                 loop {
@@ -53,18 +69,34 @@ impl EthosNetClient {
 
                 // Shutdown stream
                 stream.shutdown(std::net::Shutdown::Both).unwrap();
+                */
 
             },
-            Err(_) => return_value = 2,
+            Err(err) => { 
+                match err.kind() {
+                    // Invalid connect string
+                    std::io::ErrorKind::InvalidInput => {
+                        debug_eprintln!("handle_client_thread (ClientError::InvalidConnectionString), err({:?})",err);
+                        ct.sdr_ttoc.send(EthosNetClientUpdate::Error(ClientError::InvalidConnectionString)).unwrap();
+                    },
+                    // Server is down / busy
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ConnectionRefused | 
+                    std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::HostUnreachable | std::io::ErrorKind::NetworkUnreachable | 
+                    std::io::ErrorKind::ConnectionAborted  | std::io::ErrorKind::NotConnected => {
+                        debug_eprintln!("handle_client_thread (ClientError::ServerDown), err({:?})",err);
+                        ct.sdr_ttoc.send(EthosNetClientUpdate::Error(ClientError::ServerDown)).unwrap();
+                    }
+                    // Other IO error
+                    _ => {
+                        debug_eprintln!("handle_client_thread (ClientError::UnhandledIOError), err({:?})",err);
+                        ct.sdr_ttoc.send(EthosNetClientUpdate::Error(ClientError::UnhandledIOError(err.kind()))).unwrap();
+                    },
+                }
+                
+            },
         }
-
-        if return_value > 1 {
-            debug_eprintln!("Thread error {}", return_value);
-        }
-
-        return_value
 
     }
-    */
     
+
 }

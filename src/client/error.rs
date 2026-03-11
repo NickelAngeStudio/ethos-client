@@ -23,6 +23,7 @@ SOFTWARE.
 */
 
 /// Possible [EthosNetClient](crate::EthosNetClient) error.
+#[derive(Debug, PartialEq)]
 pub enum Error {
     /// Happens when trying to do action while client is disconnected
     ClientDisconnected,
@@ -32,6 +33,15 @@ pub enum Error {
 
     /// Client is already connected
     ClientAlreadyConnected,
+
+    /// Sending a client message failed. Usually mean channel is closed.
+    SendClientMessageFailed,
+
+    /// Server is down
+    ServerDown,
+
+    /// Unhandled IO error
+    UnhandledIOError(std::io::ErrorKind),
 
 
 }

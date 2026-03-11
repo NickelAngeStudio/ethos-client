@@ -34,6 +34,7 @@ pub enum CtoTMessage {
 }
 
 /// Thread to client update
+#[derive(Debug, PartialEq)]
 pub enum EthosNetClientUpdate {
     /// An error occurred
     Error(ClientError),
@@ -42,7 +43,7 @@ pub enum EthosNetClientUpdate {
     StatusChanged(EthosNetClientStatus),
 }
 
-/// Server to client message wrapper
-pub enum StoCMessage {
-    Message(ServerMessage),
+/// Wrapper of message coming from the remote server.
+pub(crate) enum StoCMessage {
+    Message(ServerMessage)
 }

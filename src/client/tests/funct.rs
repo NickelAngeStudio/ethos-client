@@ -1,0 +1,107 @@
+/* 
+Copyright (c) 2026  NickelAnge.Studio 
+Email               mathieu.grenier@nickelange.studio
+Git                 https://github.com/NickelAngeStudio/ethos-client
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
+
+use std::time::Duration;
+
+use ethos_core::net::TCP_PORT;
+
+use crate::{EthosNetClient, EthosNetClientUpdate, client::{self, tests::server::{self, UnitTestServer}}};
+use crate::client::error::Error as ClientError;
+
+pub const LOOP_WAIT_UPDATE_TIME : Duration = std::time::Duration::from_millis(5000);
+
+/// IP address used for test
+pub const IP_V4_TEST : &str = "127.0.0.1";
+
+#[macro_export]
+macro_rules! timeout_loop {
+
+    ($duration : expr, $($arg:tt)*) => {
+
+        let timestamp = std::time::Instant::now();
+        loop {
+            $($arg)*
+
+            if timestamp.elapsed() > $duration {
+                panic!("Timeout!");
+            }
+        }
+
+    };
+
+    ($($arg:tt)*) => {
+        timeout_loop!($crate::client::tests::LOOP_WAIT_TIME, $($arg)*);
+    };
+}
+
+
+pub(super) fn wait_update(client : &mut EthosNetClient) -> EthosNetClientUpdate {
+
+    timeout_loop!{
+        match client.update() {
+            Some(update) => return update,
+            None => {},
+        }
+    };
+    
+}
+
+pub(super) fn wait_update_message(client : &mut EthosNetClient, msg : EthosNetClientUpdate) {
+
+    timeout_loop!{ LOOP_WAIT_UPDATE_TIME,
+        if msg == wait_update(client) {
+            return;
+        }
+    }
+
+}
+
+pub(super) fn connect_string(port_minus : u16) -> String {
+    format!("{}:{}", IP_V4_TEST, TCP_PORT - port_minus)
+}
+
+pub(super) fn prepare_server(port_minus : u16) -> UnitTestServer {
+    let connect_string = connect_string(port_minus);
+    
+    let mut server = UnitTestServer::new();
+    server.start(connect_string);
+    server
+}
+
+pub(super) fn prepare_client(port_minus : u16) -> EthosNetClient {
+    let connect_string = connect_string(port_minus);
+
+    let mut client = EthosNetClient::new();
+    client.connect(connect_string).unwrap();
+    client
+}
+
+pub(super) fn prepare_server_client(port_minus : u16) -> (UnitTestServer, EthosNetClient) {
+
+    let server = prepare_server(port_minus);
+    let client = prepare_client(port_minus);
+    (server, client)
+
+} 
+
