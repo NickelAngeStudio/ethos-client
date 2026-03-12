@@ -41,42 +41,19 @@ pub(crate) struct ClientThread {
 
 impl EthosClient {
 
-    
+    /// Client thread used for EthosClient
     pub(super) fn handle_client_thread(mut ct : ClientThread) {
-
-        // Put buffer on heap
-        let mut buffer = Vec::<u8>::new();
-        buffer.resize(SERVER_MSG_BUFFER_SIZE, 0);
 
         match TcpStream::connect(ct.connect_string.clone()){
             Ok(mut stream) => {
 
                 match stream.set_nonblocking(true) {
                     Ok(_) => {
-                        // Set status as connected
-                        ct.status = EthosClientStatus::Connected;
-                        Self::send_update(&mut ct, EthosClientUpdate::StatusChanged(EthosClientStatus::Connected));
-
-                        'active:
-                        loop {
-                            if let EthosClientStatus::Connected = ct.status {
-                                Self::handle_client_message(&mut stream, &mut ct, &mut buffer);
-                            } else {
-                                break 'active;
-                            }
-
-                            if let EthosClientStatus::Connected = ct.status {
-                                Self::handle_server_message(&mut stream, &mut ct, &mut buffer);
-                            } else {
-                                break 'active;
-                            }
-                        }
-
-                        // Shutdown stream
-                        match stream.shutdown(std::net::Shutdown::Both){
-                            Ok(_) => {},
+                        match stream.set_nodelay(true) {    // disables the Nagle algorithm
+                            Ok(_) => Self::handle_client_thread_active_loop(&mut stream, &mut ct),
                             Err(err) => Self::send_update(&mut ct, EthosClientUpdate::Error(ClientError::UnhandledIOError(err.kind()))),
                         }
+                        
                     },
                     Err(err) => Self::send_update(&mut ct, EthosClientUpdate::Error(ClientError::UnhandledIOError(err.kind()))),
                 }
@@ -100,6 +77,42 @@ impl EthosClient {
 
     }
 
+    /// Client thread active loop routine
+    #[inline]
+    fn handle_client_thread_active_loop(stream : &mut TcpStream, ct : &mut ClientThread) {
+
+         // Put buffer on heap
+        let mut buffer = Vec::<u8>::new();
+        buffer.resize(SERVER_MSG_BUFFER_SIZE, 0);
+
+        // Set status as connected
+        ct.status = EthosClientStatus::Connected;
+        Self::send_update(ct, EthosClientUpdate::StatusChanged(EthosClientStatus::Connected));
+
+        'active:
+        loop {
+            if let EthosClientStatus::Connected = ct.status {
+                Self::handle_client_message(stream,ct, &mut buffer);
+            } else {
+                break 'active;
+            }
+
+            if let EthosClientStatus::Connected = ct.status {
+                Self::handle_server_message(stream, ct, &mut buffer);
+            } else {
+                break 'active;
+            }
+        }
+
+        // Shutdown stream
+        match stream.shutdown(std::net::Shutdown::Both){
+            Ok(_) => {},
+            Err(err) => Self::send_update(ct, EthosClientUpdate::Error(ClientError::UnhandledIOError(err.kind()))),
+        }
+
+    }
+
+
     /// Send an update to client. If it fail, it will disconnect thread instead of panic!.
     #[inline]
     fn send_update(ct : &mut ClientThread, update : EthosClientUpdate) {
@@ -116,7 +129,6 @@ impl EthosClient {
             Ok(_) => {},
             Err(_) => { // Channel is closed, communication to client is lost, disconnect thread
                 ct.status = EthosClientStatus::Disconnecting;
-                Self::send_update(ct, EthosClientUpdate::StatusChanged(EthosClientStatus::Disconnecting));
             },
         }
 
@@ -200,8 +212,9 @@ impl EthosClient {
                 Ok(_) => Some(ServerMessage::size_from_bytes(&buffer[0..MESSAGE_SIZE_TYPE_SIZE].try_into().unwrap()) as usize),
                 Err(err) => match err.kind() {
                     std::io::ErrorKind::WouldBlock => None,
-                    _ => {  // Report read error
+                    _ => {  // Report read error and close connection
                         Self::send_update(ct, EthosClientUpdate::Error(ClientError::ServerMessageReadError(err.kind())));
+                        Self::handle_client_message_close(ct);
                         None
                     },
                 },
@@ -223,7 +236,10 @@ impl EthosClient {
             },
             Err(err) => match err.kind() {
                 std::io::ErrorKind::WouldBlock => {},   // Try later
-                _ => Self::send_update(ct, EthosClientUpdate::Error(ClientError::ServerMessageReadError(err.kind()))),  // Report read error
+                _ => { // Report read error and close connection
+                    Self::send_update(ct, EthosClientUpdate::Error(ClientError::ServerMessageReadError(err.kind())));
+                    Self::handle_client_message_close(ct);
+                }, 
             } 
 
             

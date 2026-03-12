@@ -36,14 +36,34 @@ pub enum CtoTMessage {
     CloseConnection,
 }
 
-/// Thread to client update
+/// Update sent to [EthosClient](crate::EthosClient) from communication thread.
+/// 
+/// Update should be retrieved via [EthosClient::update()](crate::EthosClient::update) in
+/// the main loop of the software connecting to the server.
+/// ```no_run
+/// // -- snip --
+/// 'main:
+/// loop {
+///     // -- snip --
+///     'client_update:
+///     loop{
+///         match client.update() {
+///            Some(update) => {}, // -- Handle update here --
+///            None => break 'client_update,
+///         }
+///     }
+///     // -- snip --
+/// }
+/// ```
 #[derive(Debug, PartialEq)]
 pub enum EthosClientUpdate {
-    /// An error occurred
+
+    /// An error occurred during the thread execution.
     Error(ClientError),
 
-    /// Client status changed
+    /// The client status changed. Client is disconnected only when StatusChanged([`EthosClientStatus::Disconnected`](crate::EthosClientStatus::Disconnected)) update is given.
     StatusChanged(EthosClientStatus),
+
 }
 
 /// Wrapper of message coming from the remote server.

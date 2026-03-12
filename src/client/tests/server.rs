@@ -70,8 +70,10 @@ impl UnitTestServer {
             for stream in self.listener.as_mut().unwrap().incoming() {
                 match stream {
                     Ok(stream) => {
+                        stream.set_nodelay(true).unwrap();
                         stream.set_nonblocking(true).unwrap();
                         self.tcp_stream = Some(stream);
+                        return;
                     },
                     Err(_) => {},
                 }
@@ -130,7 +132,7 @@ impl UnitTestServer {
         self.inc_msg_size = match self.tcp_stream.as_mut().unwrap().read_exact(&mut self.buffer[..MESSAGE_SIZE_TYPE_SIZE]) {
             Ok(_) => Some(ClientMessage::size_from_bytes(&self.buffer[0..MESSAGE_SIZE_TYPE_SIZE].try_into().unwrap()) as usize),
             Err(err) => match err.kind() {
-                std::io::ErrorKind::WouldBlock => todo!(),
+                std::io::ErrorKind::WouldBlock => None,
                 _ => panic!("get_message_size err({:?})!", err),
             },
         };        

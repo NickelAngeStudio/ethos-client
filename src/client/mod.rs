@@ -36,7 +36,15 @@ pub mod error;
 use error::Error as ClientError;
 use ethos_core::net::{ClientMessage, ServerMessage};
 
-/// Current status of [EthosNetClient].
+/// Reservation size for element of update_vec
+const UPDATE_VEC_RESERVE : usize = 100;
+
+/// Reservation size for element of message_vec
+const MESSAGE_VEC_RESERVE : usize = 100;
+
+/// Current status of [EthosClient].
+/// 
+/// Status of client is updated using [EthosClient::update].
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum EthosClientStatus {
     /// Client is currently disconnected.
@@ -54,6 +62,30 @@ pub enum EthosClientStatus {
 }
 
 /// Client that communicate with ethos server.
+/// 
+/// # Usage
+/// ```no_run
+/// use ethos_client::*;
+/// // -- snip --
+/// let client = EthosClient::new();
+/// client.connect(format!("127.0.0.1:{}", TCP_PORT)).unwrap();
+/// // -- snip --
+/// 'main:
+/// loop {
+///     // -- snip --
+///     for update in client.update_vec() {
+///         // -- handle EthosClientUpdate --
+///     }
+/// 
+///     match client.message_vec(){ // Incoming message(s) from server
+///         Ok(message_vec) => for message in message_vec {
+///             // -- handle ServerMessage --
+///         },
+///         Err(_) => {},   // -- client is disconnected --
+///     }
+/// }
+/// 
+/// ```
 pub struct EthosClient {
     /// Sender of message to thread
     sdr_ctot : Option<Sender<CtoTMessage>>,
@@ -69,27 +101,38 @@ pub struct EthosClient {
 
     /// Status of the net client
     status : EthosClientStatus, 
+
+    /// Vector used to hold [EthosClientUpdate] for [EthosClient::update_vec()]
+    update_vec : Vec<EthosClientUpdate>,
+
+    /// Vector used to hold [ServerMessage] for [EthosClient::message_vec()]
+    message_vec : Vec<ServerMessage>
 }
 
 impl EthosClient {
-    /// Create a new [Disconnected](EthosNetClientStatus::Disconnected) EthosNetClient.
+    /// Create a new [`Disconnected`](EthosClientStatus::Disconnected) [`EthosClient`].
     /// 
     /// # Returns
-    /// - A new EthosNetClient.
+    /// - New [`EthosClient`]
     pub fn new() -> EthosClient {
+        let (mut update_vec, mut message_vec) = (Vec::<EthosClientUpdate>::new(), Vec::<ServerMessage>::new());
+        update_vec.reserve(UPDATE_VEC_RESERVE);
+        message_vec.reserve(MESSAGE_VEC_RESERVE);
+
         EthosClient { sdr_ctot: None, rcv_ttoc: None, 
-            thread_handle: None, status: EthosClientStatus::Disconnected, rcv_stoc: None }
+            thread_handle: None, status: EthosClientStatus::Disconnected, rcv_stoc: None,
+            update_vec, message_vec}
     }
 
-    /// Connect the client to server via a connection string.
+    /// Connect the client to server via a provided connection string.
     /// 
-    /// Connection string should be `host:port`. See [std::net::TcpStream] for more.
+    /// Connection string should be `host:port`. See [`TcpStream`](std::net::TcpStream) for more information.
     /// 
-    /// The result of this operation will be transmitted via [`EthosNetClientUpdate`].
+    /// The result of this operation will be transmitted via [`EthosClientUpdate`].
     /// 
     /// # Returns 
-    /// - Result
-    ///     - Ok(()) if connect query is successfull. Result is sent via [`EthosNetClientUpdate`].
+    /// - [`Result`]
+    ///     - Ok(()) if connect query is successful. Result is sent via [`EthosClientUpdate`].
     ///     - Err([`ClientAlreadyConnected`](crate::Error::ClientAlreadyConnected)) if client is already connected.
     pub fn connect(&mut self, connect_string : String) -> Result<(), ClientError> {
 
@@ -121,9 +164,9 @@ impl EthosClient {
     /// Close the connection to the server.
     /// 
     /// # Returns
-    /// - Result
-    ///     - Ok(())  if disconnect query is successfull. Result is sent via [`EthosNetClientUpdate`].
-    ///     - Err([ClientDisconnected](crate::Error::ClientDisconnected)) if client already disconnected.
+    /// - [`Result`]
+    ///     - Ok(())  if disconnect query is successful. Result is sent via [`EthosClientUpdate`].
+    ///     - Err([`ClientDisconnected`](crate::Error::ClientDisconnected)) if client already disconnected.
     pub fn close(&mut self) -> Result<(), ClientError> {
 
         match self.sdr_ctot.as_mut() {
@@ -136,15 +179,34 @@ impl EthosClient {
 
     }
 
-    /// Receive [`EthosNetClientUpdate`] from the client thread.
-    /// 
-    /// [`EthosNetClient`] is non-blocking and action like `connect()` and `close()`
-    /// result are sent via [`EthosNetClientUpdate`] thus `update()` must be handle in main loop.
-    /// 
+    /// Receive a reference of all current [`EthosClientUpdate`] in a vector.
     /// 
     /// # Returns
-    /// - [Result]
-    ///     - Some([`EthosNetClientUpdate`]) if update found.
+    /// - Reference to vector of [`EthosClientUpdate`].
+    pub fn update_vec(&mut self) -> &Vec<EthosClientUpdate> {
+       // Remove previous update
+       self.update_vec.clear(); 
+       
+
+        'update_vec:
+        loop {
+            match self.update() {
+                Some(update) => self.update_vec.push(update),
+                None => break 'update_vec,
+            }
+        }
+
+        &self.update_vec
+    }
+
+    /// Receive a [`EthosClientUpdate`] from the client thread.
+    /// 
+    /// [`EthosClient`] is non-blocking and action like `connect()` and `close()`
+    /// result are sent via [`EthosClientUpdate`].
+    /// 
+    /// # Returns
+    /// - [`Result`]
+    ///     - Some([`EthosClientUpdate`]) if update found.
     ///     - None if no update.
     pub fn update(&mut self) -> Option<EthosClientUpdate> {
 
@@ -197,7 +259,7 @@ impl EthosClient {
     fn handle_update_error(&mut self, err : ClientError) -> Option<EthosClientUpdate> {
 
 
-        match &err {    // Set client as disconnecting
+        match &err {    // Set client as disconnecting since connection never happened
             ClientError::ClientDisconnected | ClientError::InvalidConnectionString | 
                 ClientError::UnhandledIOError(_) | ClientError::ServerDown => {
                 self.status = EthosClientStatus::Disconnecting;  // Set status as disconnecting
@@ -219,14 +281,14 @@ impl EthosClient {
     }
 
 
-    /// Send a [ClientMessage] message to remote server.
+    /// Send a [`ClientMessage`] to remote ethos server.
     /// 
     /// # Returns
-    /// - Result
-    ///     - Ok(()) if message is sent.
-    ///     - Err([ClientDisconnected](crate::Error::ClientDisconnected)) if client is disconnected.
-    ///     - Err([SendClientMessageFailed](crate::Error::SendClientMessageFailed)) if send channel is closed.
-    pub fn send_message(&mut self, message : ClientMessage) -> Result<(), ClientError> {
+    /// - [`Result`]
+    ///     - Ok() if message is sent.
+    ///     - Err([`ClientDisconnected`](crate::Error::ClientDisconnected)) if client is disconnected.
+    ///     - Err([`SendClientMessageFailed`](crate::Error::SendClientMessageFailed)) if send channel is closed.
+    pub fn send(&mut self, message : ClientMessage) -> Result<(), ClientError> {
         
         match self.sdr_ctot.as_mut() {
             Some(sender) => match sender.send(CtoTMessage::SendMessage(message)){
@@ -238,15 +300,50 @@ impl EthosClient {
 
     }
 
-
-    /// Receive message from server.
+    /// Receive a reference to all current [`ServerMessage`] in a vector.
     /// 
     /// # Returns
-    /// - Result
-    ///     - Ok(Some([ServerMessage])) if message found.
+    /// - [`Result`]
+    ///     - Ok() with reference to vector of [`ServerMessage`].
+    ///     - Err([`ClientDisconnected`](crate::Error::ClientDisconnected)) if client is disconnected.
+    #[allow(unreachable_patterns)]
+    pub fn message_vec(&mut self) -> Result<&Vec<ServerMessage>, ClientError> {
+
+       match self.rcv_stoc.as_mut() {
+            Some(rcv) => {
+                // Remove previous messages
+                self.message_vec.clear(); 
+
+                'message_vec:
+                loop {
+                    match rcv.try_recv() {
+                        Ok(msg) => match msg {
+                            StoCMessage::Message(server_message) => self.message_vec.push(server_message),
+                            _ => {},    // Ignore other message
+                        },
+                        Err(_) => break 'message_vec,
+                    }
+                }
+
+                Ok(&self.message_vec)
+
+
+            },
+            None => Err(ClientError::ClientDisconnected),
+        }
+
+    }
+
+
+    /// Receive a [`ServerMessage`] from remote ethos server.
+    /// 
+    /// # Returns
+    /// - [`Result`]
+    ///     - Ok(Some([`ServerMessage`])) if message found.
     ///     - Ok(None) if no message found.
     ///     - Err([ClientDisconnected](crate::Error::ClientDisconnected)) if client is disconnected.
-    pub fn server_message(&mut self) -> Result<Option<ServerMessage>, ClientError> {
+    #[allow(unreachable_patterns)]
+    pub fn message(&mut self) -> Result<Option<ServerMessage>, ClientError> {
 
         match self.rcv_stoc.as_mut() {
             Some(rcv) => match rcv.try_recv() {
@@ -262,16 +359,13 @@ impl EthosClient {
     }
 
 
-    /// Get current client status.
+    /// Get current [`EthosClientStatus`].
     /// 
     /// # Returns
-    /// - [EthosNetClientStatus] of client.
+    /// - [`EthosClientStatus`] of client.
     pub fn status(&self) -> EthosClientStatus {
         self.status
     }
-
-
-
 
 
 }

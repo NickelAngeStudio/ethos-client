@@ -24,7 +24,7 @@ SOFTWARE.
 
 use std::time::Duration;
 
-use ethos_core::net::TCP_PORT;
+use ethos_core::net::{ClientMessage, ServerMessage, TCP_PORT};
 
 use crate::{EthosClient, EthosClientStatus, EthosClientUpdate, client::tests::server::UnitTestServer};
 
@@ -90,6 +90,32 @@ pub(super) fn wait_update(client : &mut EthosClient) -> EthosClientUpdate {
     
 }
 
+pub(super) fn wait_server_message(client : &mut EthosClient) -> ServerMessage {
+
+    timeout_loop!{
+        match client.message() {
+            Ok(opt) => match opt {
+                Some(message) => return message,
+                None => {},
+            },
+            Err(err) => panic!("client.message shouldn't err({:?})", err),
+        }
+    };
+    
+}
+
+pub(super) fn wait_client_message(server : &mut UnitTestServer) -> ClientMessage {
+
+    timeout_loop!{
+        match server.client_message() {
+            Some(msg) => return msg,
+            None => {},
+        }
+    };
+    
+}
+
+
 pub(super) fn wait_disconnected(client : &mut EthosClient) {
      wait_update_message(client, EthosClientUpdate::StatusChanged(EthosClientStatus::Disconnected));
     // Make sure thread was joined
@@ -131,8 +157,9 @@ pub(super) fn prepare_client(port_minus : u16) -> EthosClient {
 
 pub(super) fn prepare_server_client(port_minus : u16) -> (UnitTestServer, EthosClient) {
 
-    let server = prepare_server(port_minus);
+    let mut server = prepare_server(port_minus);
     let client = prepare_client(port_minus);
+    server.accept();
     (server, client)
 
 } 

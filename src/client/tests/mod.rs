@@ -35,21 +35,32 @@ SOFTWARE.
 //! V10 : server_message give ClientDisconnected when disconnected
 //! V11 : server_message receive None when no message
 //! V11 : server_message receive Some(ServerMessage)
-//! V13 : update join handle and clear channels.
+//! V13 : Close Connection update join handle and clear channels.
 //! V14 : Handle server connection drop
 //! V15 : Trying to connect when server down should return ServerDown.
 //! V16 : ServerDown then server up connection should work.
 //! V17 : ClientMessageTooLarge
-use std::time::Duration;
+//! V18 : update_vec gives update in a convenient vector.
+//! V19 : message_vec gives server message in a convenient vector.
+use std::{thread, time::Duration, u16};
 
-use crate::{EthosClient, EthosClientStatus, EthosClientUpdate, client::{self, tests::funct::{connect_string, prepare_client, prepare_server, prepare_server_client, wait_disconnected, wait_update, wait_update_message}}, timeloop, timeout_loop};
+use ethos_core::net::{CLIENT_MSG_MAX_SIZE, ClientMessage, ClientPayload, ServerMessage, ServerPayload};
+
+use crate::{EthosClient, EthosClientStatus, EthosClientUpdate, client::tests::funct::{connect_string, prepare_client, prepare_server, prepare_server_client, wait_client_message, wait_disconnected, wait_server_message, wait_update_message}, timeloop, timeout_loop};
 use crate::client::error::Error as ClientError;
 
 mod funct;
 mod server;
 
 /// Maximum loop wait time.
-pub const LOOP_WAIT_TIME : Duration = std::time::Duration::from_millis(5000);
+pub const LOOP_WAIT_TIME : Duration = std::time::Duration::from_millis(1000);
+
+/// Client payload used for control
+const CONTROL_CLIENT_PAYLOAD : ClientPayload = ethos_core::net::ClientPayload::Test { p16: u16::MAX / 4, p32: u32::MAX / 4 };
+
+/// Server payload used for control
+const CONTROL_SERVER_PAYLOAD : ServerPayload = ethos_core::net::ServerPayload::Test { p16: u16::MAX / 16, p32: u32::MAX / 16 };
+const CONTROL_SERVER_TIMESTAMP : u64 = u64::MAX / 256;
 
 #[test]
 fn v1_create_client(){
@@ -153,54 +164,163 @@ fn v6_close_connection_disc(){
 
 #[test]
 fn v7_close_connection(){
-    // V7 : Close connection give Ok(()) when connected
-    todo!()
+    // V7 : Close connection give Ok(()) when connected and send correct update
+    let (_server, mut client) = prepare_server_client(7);
+
+    match client.close() {
+        Ok(_) => {
+            wait_update_message(&mut client, EthosClientUpdate::StatusChanged(EthosClientStatus::Disconnected));
+            assert_eq!(client.status(), EthosClientStatus::Disconnected);
+        },
+        Err(err) => panic!("Close shouldn't err ({:?})", err),
+    }
 }
 
 #[test]
 fn v8_send_message_disc(){
     // V8 : send_message give ClientDisconnected when disconnected
-    todo!()
+    let mut client = EthosClient::new();
+
+    match client.send(ClientMessage::new(CONTROL_CLIENT_PAYLOAD)) {
+        Ok(_) => panic!("v8 shouldn't be Ok()!"),
+        Err(err) => assert_eq!(err, ClientError::ClientDisconnected),
+    }
+    
 }
 
 #[test]
 fn v9_send_message(){
     // V9 : send_message send a message successfully
-    todo!()
+    let (mut server, mut client) = prepare_server_client(9);
+
+    client.send(ClientMessage::new(CONTROL_CLIENT_PAYLOAD)).unwrap();
+
+    assert_eq!(wait_client_message(&mut server), ClientMessage::new(CONTROL_CLIENT_PAYLOAD));
 }
 
 #[test]
 fn v10_server_message_disc(){
     // V10 : server_message give ClientDisconnected when disconnected
-    todo!()
+    let mut client = EthosClient::new();
+
+    match client.message() {
+        Ok(_) => panic!("v10 shouldn't be Ok()!"),
+        Err(err) => assert_eq!(err, ClientError::ClientDisconnected),
+    }
 }
 
 #[test]
 fn v11_server_message_none(){
     // V11 : server_message receive None when no message
-    todo!()
+    let (_server, mut client) = prepare_server_client(11);
+
+    assert!(client.message().unwrap().is_none());
 }
 
 #[test]
 fn v12_server_message_some(){
     // V12 : server_message receive Some(ServerMessage)
-    todo!()
+    let (mut server, mut client) = prepare_server_client(12);
+
+    let loop_max : usize = 100;
+    let mut loop_index : usize = 0;
+    timeout_loop!{
+        server.send_message(ServerMessage::new(CONTROL_SERVER_TIMESTAMP, CONTROL_SERVER_PAYLOAD));
+        assert_eq!(wait_server_message(&mut client),ServerMessage::new(CONTROL_SERVER_TIMESTAMP, CONTROL_SERVER_PAYLOAD));
+
+        loop_index += 1;
+
+        if loop_index >= loop_max {
+            break;
+        }
+    }
+    
+
 }
 
 #[test]
 fn v13_update_join_handle(){
-    // V13 : update join handle.
-    todo!()
+    // V13 : Close Connection update join handle and clear channels.
+    let (_server, mut client) = prepare_server_client(13);
+
+    match client.close() {
+        Ok(_) => {
+            wait_update_message(&mut client, EthosClientUpdate::StatusChanged(EthosClientStatus::Disconnected));
+            assert_eq!(client.status(), EthosClientStatus::Disconnected);
+            assert!(client.rcv_stoc.is_none());
+            assert!(client.rcv_ttoc.is_none());
+            assert!(client.sdr_ctot.is_none());
+            assert!(client.thread_handle.is_none());
+        },
+        Err(err) => panic!("Close shouldn't err ({:?})", err),
+    }
 }
 
 #[test]
 fn v14_handle_connection_drop() {
     // V14 : Handle server connection drop
+    let (mut server, mut client) = prepare_server_client(14);
 
+    server.close();
+
+    // Client will disconnect from server if connection lost.
+    wait_update_message(&mut client, EthosClientUpdate::StatusChanged(EthosClientStatus::Disconnected));
 }
 
 #[test]
 fn v17_client_message_too_large() {
     // V17 : ClientMessageTooLarge
+    let (_server, mut client) = prepare_server_client(17);
 
+    client.send(ClientMessage { size: (CLIENT_MSG_MAX_SIZE + 1) as u16 , payload: CONTROL_CLIENT_PAYLOAD }).unwrap();
+
+    wait_update_message(&mut client, EthosClientUpdate::Error(ClientError::ClientMessageTooLarge));
+}
+
+#[test]
+fn v18_update_vec() {
+    //V18 : update_vec gives update in a convenient vector.
+    let (_server, mut client) = prepare_server_client(18);
+
+    // Wait for connection messages
+    thread::sleep(Duration::from_millis(100));
+
+    let update = client.update_vec();
+    assert!(update.len() > 0);
+
+    // Wait for connection messages
+    thread::sleep(Duration::from_millis(100));
+    assert!(client.update_vec().len() == 0);    // Vec should be empty now.
+}
+
+
+#[test]
+fn v19_message_vec() {
+    // V19 : message_vec gives server message in a convenient vector.
+
+    let (mut server, mut client) = prepare_server_client(19);
+
+    let total_message : usize = u8::MAX as usize;
+
+    // Send 256 messages
+    for _ in 0..total_message {
+        server.send_message(ServerMessage::new(CONTROL_SERVER_TIMESTAMP, CONTROL_SERVER_PAYLOAD));
+    }
+
+    // Wait for all message to reach client
+    thread::sleep(Duration::from_millis(1000));
+
+    match client.message_vec() {
+        Ok(mvec) => {
+            assert_eq!(mvec.len(), total_message);
+            for msg in mvec {
+                assert_eq!(*msg, ServerMessage::new(CONTROL_SERVER_TIMESTAMP, CONTROL_SERVER_PAYLOAD));
+            }
+        },
+        Err(err) => panic!("v19 shouldn't err({:?})", err),
+    }
+
+    // Message vec should be empty now.
+    assert_eq!(client.message_vec().unwrap().len(), 0);
+    
 }

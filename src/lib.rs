@@ -1,3 +1,5 @@
+#![doc(html_logo_url = "https://avatars.githubusercontent.com/u/67743099?v=4")]
+
 /* 
 Copyright (c) 2026  NickelAnge.Studio 
 Email               mathieu.grenier@nickelange.studio
@@ -21,6 +23,12 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
+
+//! Library used to connect to the ethos-server via [EthosClient].
+//! 
+//! [EthosClient] is [`non-blocking`](https://doc.rust-lang.org/std/net/struct.TcpStream.html#method.set_nonblocking),
+//! [`no delay`](https://doc.rust-lang.org/std/net/struct.TcpStream.html#method.set_nodelay), safe and doesn't contain
+//! any AI submitted code.
 
 #[doc(hidden)]
 pub mod client;

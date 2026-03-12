@@ -24,7 +24,7 @@ SOFTWARE.
 
 use ethos_core::net::Error as CoreError;
 
-/// Possible [EthosNetClient](crate::EthosNetClient) error.
+/// Possible [EthosClient](crate::EthosClient) error.
 #[derive(Debug, PartialEq)]
 pub enum Error {
     /// Happens when trying to do action while client is disconnected
