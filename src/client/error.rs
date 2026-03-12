@@ -22,6 +22,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+use ethos_core::net::Error as CoreError;
+
 /// Possible [EthosNetClient](crate::EthosNetClient) error.
 #[derive(Debug, PartialEq)]
 pub enum Error {
@@ -43,5 +45,19 @@ pub enum Error {
     /// Unhandled IO error
     UnhandledIOError(std::io::ErrorKind),
 
+    /// ClientMessage size is too large
+    ClientMessageTooLarge,
+
+    /// Error occurred when packing bytes
+    ClientMessagePackError(CoreError),
+
+    /// Failed to send message to server
+    ClientMessageSendError(std::io::ErrorKind),
+
+    /// Error occurred while reading message from server
+    ServerMessageReadError(std::io::ErrorKind),
+
+    /// Error occurred when retrieving ServerMessage from bytes
+    ServerMessageFromBytesError(CoreError)
 
 }

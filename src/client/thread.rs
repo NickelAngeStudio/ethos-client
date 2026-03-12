@@ -22,23 +22,24 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-use std::{net::TcpStream, sync::mpsc::{Receiver, Sender}};
+use std::{io::{Read, Write}, net::TcpStream, sync::mpsc::{Receiver, Sender}};
 
-use debug_print::debug_eprintln;
-use ethos_core::net::SERVER_MSG_BUFFER_SIZE;
-use crate::Error as ClientError;
+use ethos_core::net::{CLIENT_MSG_MAX_SIZE, ClientMessage, MESSAGE_SIZE_TYPE_SIZE, SERVER_MSG_BUFFER_SIZE, ServerMessage};
+use crate::{Error as ClientError, EthosClient, EthosClientStatus};
 
-use crate::{EthosNetClient, EthosNetClientUpdate, client::message::{CtoTMessage, StoCMessage}};
+use crate::{ EthosClientUpdate, client::message::{CtoTMessage, StoCMessage}};
 
 /// Client thread parameters
 pub(crate) struct ClientThread {
     pub(crate)  connect_string : String, 
     pub(crate)  rcv_ctot : Receiver<CtoTMessage>, 
-    pub(crate)  sdr_ttoc : Sender<EthosNetClientUpdate>, 
-    pub(crate)  sdr_stoc : Sender<StoCMessage>
+    pub(crate)  sdr_ttoc : Sender<EthosClientUpdate>, 
+    pub(crate)  sdr_stoc : Sender<StoCMessage>,
+    pub(crate)  status : EthosClientStatus,
+    pub(crate)  inc_size : Option<usize>
 }
 
-impl EthosNetClient {
+impl EthosClient {
 
     
     pub(super) fn handle_client_thread(mut ct : ClientThread) {
@@ -47,56 +48,201 @@ impl EthosNetClient {
         let mut buffer = Vec::<u8>::new();
         buffer.resize(SERVER_MSG_BUFFER_SIZE, 0);
 
-        // Return value
-        let mut return_value : usize = 0;
-
         match TcpStream::connect(ct.connect_string.clone()){
             Ok(mut stream) => {
-                stream.set_nonblocking(true).unwrap();
 
-                /*
-                sdr_ttoc.send(TtoCMessage::Connected).unwrap();
+                match stream.set_nonblocking(true) {
+                    Ok(_) => {
+                        // Set status as connected
+                        ct.status = EthosClientStatus::Connected;
+                        Self::send_update(&mut ct, EthosClientUpdate::StatusChanged(EthosClientStatus::Connected));
 
-                loop {
-                    Self::handle_client_message(&mut stream, &mut return_value, &mut buffer, &mut rcv_ctot);
+                        'active:
+                        loop {
+                            if let EthosClientStatus::Connected = ct.status {
+                                Self::handle_client_message(&mut stream, &mut ct, &mut buffer);
+                            } else {
+                                break 'active;
+                            }
 
-                    if return_value == 0 {
-                        Self::handle_server_message(&mut stream, &mut return_value, &mut buffer, &mut sdr_ttoc);
-                    } else {
-                        break;
-                    }
+                            if let EthosClientStatus::Connected = ct.status {
+                                Self::handle_server_message(&mut stream, &mut ct, &mut buffer);
+                            } else {
+                                break 'active;
+                            }
+                        }
+
+                        // Shutdown stream
+                        match stream.shutdown(std::net::Shutdown::Both){
+                            Ok(_) => {},
+                            Err(err) => Self::send_update(&mut ct, EthosClientUpdate::Error(ClientError::UnhandledIOError(err.kind()))),
+                        }
+                    },
+                    Err(err) => Self::send_update(&mut ct, EthosClientUpdate::Error(ClientError::UnhandledIOError(err.kind()))),
                 }
-
-                // Shutdown stream
-                stream.shutdown(std::net::Shutdown::Both).unwrap();
-                */
-
             },
             Err(err) => { 
                 match err.kind() {
                     // Invalid connect string
-                    std::io::ErrorKind::InvalidInput => {
-                        debug_eprintln!("handle_client_thread (ClientError::InvalidConnectionString), err({:?})",err);
-                        ct.sdr_ttoc.send(EthosNetClientUpdate::Error(ClientError::InvalidConnectionString)).unwrap();
-                    },
+                    std::io::ErrorKind::InvalidInput => Self::send_update(&mut ct, EthosClientUpdate::Error(ClientError::InvalidConnectionString)),
                     // Server is down / busy
                     std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ConnectionRefused | 
                     std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::HostUnreachable | std::io::ErrorKind::NetworkUnreachable | 
                     std::io::ErrorKind::ConnectionAborted  | std::io::ErrorKind::NotConnected => {
-                        debug_eprintln!("handle_client_thread (ClientError::ServerDown), err({:?})",err);
-                        ct.sdr_ttoc.send(EthosNetClientUpdate::Error(ClientError::ServerDown)).unwrap();
+                        Self::send_update(&mut ct, EthosClientUpdate::Error(ClientError::ServerDown));
                     }
                     // Other IO error
-                    _ => {
-                        debug_eprintln!("handle_client_thread (ClientError::UnhandledIOError), err({:?})",err);
-                        ct.sdr_ttoc.send(EthosNetClientUpdate::Error(ClientError::UnhandledIOError(err.kind()))).unwrap();
-                    },
+                    _ => Self::send_update(&mut ct, EthosClientUpdate::Error(ClientError::UnhandledIOError(err.kind()))),
                 }
                 
             },
         }
 
     }
+
+    /// Send an update to client. If it fail, it will disconnect thread instead of panic!.
+    #[inline]
+    fn send_update(ct : &mut ClientThread, update : EthosClientUpdate) {
+
+        #[cfg(debug_assertions)]
+        {
+            match &update { // Print error in debug mode
+                EthosClientUpdate::Error(_) => println!("{:?}", update),
+                _ => {},
+            }
+        }
+
+        match ct.sdr_ttoc.send(update){
+            Ok(_) => {},
+            Err(_) => { // Channel is closed, communication to client is lost, disconnect thread
+                ct.status = EthosClientStatus::Disconnecting;
+                Self::send_update(ct, EthosClientUpdate::StatusChanged(EthosClientStatus::Disconnecting));
+            },
+        }
+
+    }
     
+
+    /// Handle messages coming from EthosClient.
+    #[inline]
+    fn handle_client_message(stream : &mut TcpStream, ct : &mut ClientThread, buffer : &mut Vec<u8>){
+
+        'client:
+        loop {
+            match ct.rcv_ctot.try_recv() {
+                Ok(message) => match message {
+                    CtoTMessage::SendMessage(client_message) => Self::handle_client_message_send(stream, ct, client_message, buffer),
+                    CtoTMessage::CloseConnection => Self::handle_client_message_close(ct),
+                },
+                Err(_) => break 'client,
+            }
+        }
+        
+    }
+
+    /// Send message to server
+    #[inline]
+    fn handle_client_message_send(stream : &mut TcpStream, ct : &mut ClientThread, client_message : ClientMessage, buffer : &mut Vec<u8>){
+
+        if client_message.size as usize <= CLIENT_MSG_MAX_SIZE {    // Limit size of message
+
+            match client_message.pack_bytes(buffer) {
+                Ok(size) => {
+                    if client_message.size as usize <= CLIENT_MSG_MAX_SIZE { 
+                        match stream.write_all(&buffer[0..size]) {
+                            Ok(_) => {},
+                            Err(err) => Self::send_update(ct, EthosClientUpdate::Error(ClientError::ClientMessageSendError(err.kind()))),
+                        }
+                    } else {    // Message too large to send
+                        Self::send_update(ct, EthosClientUpdate::Error(ClientError::ClientMessageTooLarge));
+                    }
+                },
+                Err(err) => Self::send_update(ct, EthosClientUpdate::Error(ClientError::ClientMessagePackError(err))),
+            }
+
+        } else {    // Message is too large to send
+            Self::send_update(ct, EthosClientUpdate::Error(ClientError::ClientMessageTooLarge));
+        }
+
+
+    }
+
+    /// Close client connection to server
+    #[inline]
+    fn handle_client_message_close(ct : &mut ClientThread){
+
+        ct.status = EthosClientStatus::Disconnecting;
+        Self::send_update(ct, EthosClientUpdate::StatusChanged(EthosClientStatus::Disconnecting));
+
+
+    }
+
+    /// Handle message coming from server
+    #[inline]
+    fn handle_server_message(stream : &mut TcpStream, ct : &mut ClientThread, buffer : &mut Vec<u8>) {
+
+        // Read the size first if any
+        Self::handle_server_message_size(stream, ct, buffer);
+        // Read the message if size found
+        if let Some(size) = ct.inc_size {
+            Self::handle_server_message_read(stream, ct, buffer, size);
+        } 
+
+    }
+
+    /// Handle reading size of message
+    #[inline]
+    fn handle_server_message_size(stream : &mut TcpStream, ct : &mut ClientThread, buffer : &mut Vec<u8>) {
+
+        if ct.inc_size.is_none() {
+            // Read size first if none
+            ct.inc_size = match stream.read_exact(&mut buffer[..MESSAGE_SIZE_TYPE_SIZE]) {
+                Ok(_) => Some(ServerMessage::size_from_bytes(&buffer[0..MESSAGE_SIZE_TYPE_SIZE].try_into().unwrap()) as usize),
+                Err(err) => match err.kind() {
+                    std::io::ErrorKind::WouldBlock => None,
+                    _ => {  // Report read error
+                        Self::send_update(ct, EthosClientUpdate::Error(ClientError::ServerMessageReadError(err.kind())));
+                        None
+                    },
+                },
+            };
+        }
+
+    }
+
+    /// Handle reading the message itself
+    fn handle_server_message_read(stream : &mut TcpStream, ct : &mut ClientThread, buffer : &mut Vec<u8>, size:usize) {
+
+        match stream.read_exact(&mut buffer[..size]) {
+            Ok(_) => match ServerMessage::from_bytes(&buffer[0..size]){
+                Ok(message) => {
+                    Self::send_server_message_to_client(ct, message);
+                    ct.inc_size = None;
+                },  // Error shouldn't happens since message are coming from server via TCP.
+                Err(err) => Self::send_update(ct, EthosClientUpdate::Error(ClientError::ServerMessageFromBytesError(err))),
+            },
+            Err(err) => match err.kind() {
+                std::io::ErrorKind::WouldBlock => {},   // Try later
+                _ => Self::send_update(ct, EthosClientUpdate::Error(ClientError::ServerMessageReadError(err.kind()))),  // Report read error
+            } 
+
+            
+        };
+
+    }
+
+    /// Send the server message received to client via channel
+    #[inline]
+    fn send_server_message_to_client(ct : &mut ClientThread, msg : ServerMessage) {
+
+         match ct.sdr_stoc.send(StoCMessage::Message(msg)) {
+            Ok(_) => {},
+            Err(_) => { // Channel is closed, communication to client is lost, disconnect thread
+                ct.status = EthosClientStatus::Disconnecting;
+                Self::send_update(ct, EthosClientUpdate::StatusChanged(EthosClientStatus::Disconnecting));
+            },
+        }
+
+    }
 
 }

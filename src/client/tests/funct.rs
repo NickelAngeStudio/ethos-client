@@ -26,8 +26,7 @@ use std::time::Duration;
 
 use ethos_core::net::TCP_PORT;
 
-use crate::{EthosNetClient, EthosNetClientUpdate, client::{self, tests::server::{self, UnitTestServer}}};
-use crate::client::error::Error as ClientError;
+use crate::{EthosClient, EthosClientStatus, EthosClientUpdate, client::tests::server::UnitTestServer};
 
 pub const LOOP_WAIT_UPDATE_TIME : Duration = std::time::Duration::from_millis(5000);
 
@@ -55,8 +54,32 @@ macro_rules! timeout_loop {
     };
 }
 
+/// Loop that run it's full duration.
+#[macro_export]
+macro_rules! timeloop {
 
-pub(super) fn wait_update(client : &mut EthosNetClient) -> EthosNetClientUpdate {
+    ($duration : expr, $($arg:tt)*) => {
+
+        let timestamp = std::time::Instant::now();
+
+        'timeloop:
+        loop {
+            $($arg)*
+
+            if timestamp.elapsed() > $duration {
+                break 'timeloop;
+            }
+        }
+
+    };
+
+    ($($arg:tt)*) => {
+        timeloop!($crate::client::tests::LOOP_WAIT_TIME, $($arg)*);
+    };
+}
+
+
+pub(super) fn wait_update(client : &mut EthosClient) -> EthosClientUpdate {
 
     timeout_loop!{
         match client.update() {
@@ -67,7 +90,16 @@ pub(super) fn wait_update(client : &mut EthosNetClient) -> EthosNetClientUpdate 
     
 }
 
-pub(super) fn wait_update_message(client : &mut EthosNetClient, msg : EthosNetClientUpdate) {
+pub(super) fn wait_disconnected(client : &mut EthosClient) {
+     wait_update_message(client, EthosClientUpdate::StatusChanged(EthosClientStatus::Disconnected));
+    // Make sure thread was joined
+    assert!(client.thread_handle.is_none());
+    assert!(client.rcv_ttoc.is_none());
+    assert!(client.rcv_stoc.is_none());
+    assert!(client.sdr_ctot.is_none());
+}
+
+pub(super) fn wait_update_message(client : &mut EthosClient, msg : EthosClientUpdate) {
 
     timeout_loop!{ LOOP_WAIT_UPDATE_TIME,
         if msg == wait_update(client) {
@@ -89,15 +121,15 @@ pub(super) fn prepare_server(port_minus : u16) -> UnitTestServer {
     server
 }
 
-pub(super) fn prepare_client(port_minus : u16) -> EthosNetClient {
+pub(super) fn prepare_client(port_minus : u16) -> EthosClient {
     let connect_string = connect_string(port_minus);
 
-    let mut client = EthosNetClient::new();
+    let mut client = EthosClient::new();
     client.connect(connect_string).unwrap();
     client
 }
 
-pub(super) fn prepare_server_client(port_minus : u16) -> (UnitTestServer, EthosNetClient) {
+pub(super) fn prepare_server_client(port_minus : u16) -> (UnitTestServer, EthosClient) {
 
     let server = prepare_server(port_minus);
     let client = prepare_client(port_minus);

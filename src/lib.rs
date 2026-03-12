@@ -26,6 +26,6 @@ SOFTWARE.
 pub mod client;
 
 pub use client::error::Error as Error;
-pub use client::EthosNetClient as EthosNetClient;
-pub use client::EthosNetClientStatus as EthosNetClientStatus;
-pub use client::message::EthosNetClientUpdate as EthosNetClientUpdate;
+pub use client::EthosClient as EthosClient;
+pub use client::EthosClientStatus as EthosClientStatus;
+pub use client::message::EthosClientUpdate as EthosClientUpdate;

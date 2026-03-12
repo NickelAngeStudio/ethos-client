@@ -24,23 +24,26 @@ SOFTWARE.
 
 use ethos_core::net::{ClientMessage, ServerMessage};
 
-use crate::{Error as ClientError, EthosNetClientStatus};
+use crate::{Error as ClientError, EthosClientStatus};
 
 
 /// Client to thread message
 pub enum CtoTMessage {
-    Message(ClientMessage),
+    /// Client message to send to the server
+    SendMessage(ClientMessage),
+
+    /// Tell client to close connection
     CloseConnection,
 }
 
 /// Thread to client update
 #[derive(Debug, PartialEq)]
-pub enum EthosNetClientUpdate {
+pub enum EthosClientUpdate {
     /// An error occurred
     Error(ClientError),
 
     /// Client status changed
-    StatusChanged(EthosNetClientStatus),
+    StatusChanged(EthosClientStatus),
 }
 
 /// Wrapper of message coming from the remote server.

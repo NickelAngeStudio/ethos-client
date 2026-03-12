@@ -38,7 +38,7 @@ use ethos_core::net::{ClientMessage, ServerMessage};
 
 /// Current status of [EthosNetClient].
 #[derive(Debug, PartialEq, Clone, Copy)]
-pub enum EthosNetClientStatus {
+pub enum EthosClientStatus {
     /// Client is currently disconnected.
     Disconnected,
 
@@ -54,12 +54,12 @@ pub enum EthosNetClientStatus {
 }
 
 /// Client that communicate with ethos server.
-pub struct EthosNetClient {
+pub struct EthosClient {
     /// Sender of message to thread
     sdr_ctot : Option<Sender<CtoTMessage>>,
 
     /// Receiver of messages from thread
-    rcv_ttoc : Option<Receiver<EthosNetClientUpdate>>,
+    rcv_ttoc : Option<Receiver<EthosClientUpdate>>,
 
     /// Receiver of messages from server
     rcv_stoc : Option<Receiver<StoCMessage>>,
@@ -68,17 +68,17 @@ pub struct EthosNetClient {
     thread_handle : Option<JoinHandle<()>>,
 
     /// Status of the net client
-    status : EthosNetClientStatus,
+    status : EthosClientStatus, 
 }
 
-impl EthosNetClient {
+impl EthosClient {
     /// Create a new [Disconnected](EthosNetClientStatus::Disconnected) EthosNetClient.
     /// 
     /// # Returns
     /// - A new EthosNetClient.
-    pub fn new() -> EthosNetClient {
-        EthosNetClient { sdr_ctot: None, rcv_ttoc: None, 
-            thread_handle: None, status: EthosNetClientStatus::Disconnected, rcv_stoc: None }
+    pub fn new() -> EthosClient {
+        EthosClient { sdr_ctot: None, rcv_ttoc: None, 
+            thread_handle: None, status: EthosClientStatus::Disconnected, rcv_stoc: None }
     }
 
     /// Connect the client to server via a connection string.
@@ -93,25 +93,28 @@ impl EthosNetClient {
     ///     - Err([`ClientAlreadyConnected`](crate::Error::ClientAlreadyConnected)) if client is already connected.
     pub fn connect(&mut self, connect_string : String) -> Result<(), ClientError> {
 
-        if self.thread_handle.is_none() {
-            let (sdr_ctot, rcv_ctot) = mpsc::channel::<CtoTMessage>();
-            let (sdr_ttoc, rcv_ttoc) = mpsc::channel::<EthosNetClientUpdate>();
-            let (sdr_stoc, rcv_stoc) = mpsc::channel::<StoCMessage>();
+        match self.status {
+            EthosClientStatus::Disconnected => { // Only connect if client is disconnected
+                self.status = EthosClientStatus::Connecting; // Change status to connecting
 
-            self.sdr_ctot = Some(sdr_ctot);
-            self.rcv_ttoc = Some(rcv_ttoc);
-            self.rcv_stoc = Some(rcv_stoc);
+                let (sdr_ctot, rcv_ctot) = mpsc::channel::<CtoTMessage>();
+                let (sdr_ttoc, rcv_ttoc) = mpsc::channel::<EthosClientUpdate>();
+                let (sdr_stoc, rcv_stoc) = mpsc::channel::<StoCMessage>();
 
-            // Start client thread
-            self.thread_handle = Some(std::thread::spawn(move || {
-                Self::handle_client_thread(ClientThread { connect_string, rcv_ctot, sdr_ttoc, sdr_stoc });
-            }));
+                self.sdr_ctot = Some(sdr_ctot);
+                self.rcv_ttoc = Some(rcv_ttoc);
+                self.rcv_stoc = Some(rcv_stoc);
 
-            Ok(())
-        } else {
-            Err(ClientError::ClientAlreadyConnected)
+                // Start client thread
+                self.thread_handle = Some(std::thread::spawn(move || {
+                    Self::handle_client_thread(ClientThread { connect_string, rcv_ctot, sdr_ttoc, sdr_stoc, status: EthosClientStatus::Connecting, inc_size: None });
+                }));
+
+                Ok(())
+            },
+            _ => Err(ClientError::ClientAlreadyConnected),
         }
-        
+
 
     }
 
@@ -123,7 +126,13 @@ impl EthosNetClient {
     ///     - Err([ClientDisconnected](crate::Error::ClientDisconnected)) if client already disconnected.
     pub fn close(&mut self) -> Result<(), ClientError> {
 
-        todo!()
+        match self.sdr_ctot.as_mut() {
+            Some(sender) => match sender.send(CtoTMessage::CloseConnection){
+                Ok(_) => Ok(()),
+                Err(_) => Err(ClientError::SendClientMessageFailed),
+            },
+            None => Err(ClientError::ClientDisconnected),
+        }
 
     }
 
@@ -137,16 +146,76 @@ impl EthosNetClient {
     /// - [Result]
     ///     - Some([`EthosNetClientUpdate`]) if update found.
     ///     - None if no update.
-    pub fn update(&mut self) -> Option<EthosNetClientUpdate> {
-        
-        match self.rcv_ttoc.as_mut() {
-            Some(rcv) => match rcv.try_recv() {
-                Ok(msg) => Some(msg),
-                Err(_) => None,
-            },
-            None => None,
+    pub fn update(&mut self) -> Option<EthosClientUpdate> {
+
+        // If Disconnecting, final step is to disconnect and join thread
+        if self.status == EthosClientStatus::Disconnecting {
+            self.handle_update_disconnecting()
+        } else {
+             // Get message
+            match self.rcv_ttoc.as_mut() {
+                Some(rcv) => match rcv.try_recv() {
+                    Ok(msg) => {
+                        match msg {
+                            EthosClientUpdate::Error(error) => self.handle_update_error(error),
+                            EthosClientUpdate::StatusChanged(status) =>self.handle_update_status_changed(status),
+                        }
+                    },
+                    Err(_) => None,
+                },
+                None => None,
+            }
         }
         
+    }
+
+    /// Handle final non-blocking step to disconnect client.
+    #[inline]
+    fn handle_update_disconnecting(&mut self) -> Option<EthosClientUpdate> {
+
+        // Is thread ready to join?
+        if self.thread_handle.as_ref().unwrap().is_finished() {
+            self.thread_handle.take().unwrap().join().unwrap();  // Join thread
+
+            // Close channels
+            self.sdr_ctot.take();
+            self.rcv_stoc.take();
+            self.rcv_ttoc.take();
+
+            // Set status as disconnected.
+            self.status = EthosClientStatus::Disconnected;
+            Some(EthosClientUpdate::StatusChanged(EthosClientStatus::Disconnected))
+        } else {
+            None
+        }
+
+
+    }
+
+    /// Handle error of update
+    #[inline]
+    fn handle_update_error(&mut self, err : ClientError) -> Option<EthosClientUpdate> {
+
+
+        match &err {    // Set client as disconnecting
+            ClientError::ClientDisconnected | ClientError::InvalidConnectionString | 
+                ClientError::UnhandledIOError(_) | ClientError::ServerDown => {
+                self.status = EthosClientStatus::Disconnecting;  // Set status as disconnecting
+
+            }
+            _ => {}
+        }
+
+        Some(EthosClientUpdate::Error(err))
+    }
+
+    /// Handle status changed of update.
+    #[inline]
+    fn handle_update_status_changed(&mut self, new_status : EthosClientStatus) -> Option<EthosClientUpdate> {
+
+        self.status = new_status;
+        Some(EthosClientUpdate::StatusChanged(new_status)) 
+
     }
 
 
@@ -160,7 +229,7 @@ impl EthosNetClient {
     pub fn send_message(&mut self, message : ClientMessage) -> Result<(), ClientError> {
         
         match self.sdr_ctot.as_mut() {
-            Some(sender) => match sender.send(CtoTMessage::Message(message)){
+            Some(sender) => match sender.send(CtoTMessage::SendMessage(message)){
                 Ok(_) => Ok(()),
                 Err(_) => Err(ClientError::SendClientMessageFailed),
             },
@@ -197,7 +266,7 @@ impl EthosNetClient {
     /// 
     /// # Returns
     /// - [EthosNetClientStatus] of client.
-    pub fn status(&self) -> EthosNetClientStatus {
+    pub fn status(&self) -> EthosClientStatus {
         self.status
     }
 
