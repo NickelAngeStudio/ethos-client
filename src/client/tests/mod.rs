@@ -46,7 +46,7 @@ use std::{thread, time::Duration, u16};
 
 use ethos_core::net::{CLIENT_MSG_MAX_SIZE, ClientMessage, ClientPayload, ServerMessage, ServerPayload};
 
-use crate::{EthosClient, EthosClientStatus, EthosClientUpdate, client::tests::funct::{connect_string, prepare_client, prepare_server, prepare_server_client, wait_client_message, wait_disconnected, wait_server_message, wait_update_message}, timeloop, timeout_loop};
+use crate::{EthosClient, EthosClientStatus, EthosClientUpdate, client::tests::funct::{connect_string, prepare_client, prepare_client_no_wait, prepare_server, prepare_server_client, prepare_server_client_no_wait, wait_client_message, wait_disconnected, wait_server_message, wait_update_message}, timeloop, timeout_loop};
 use crate::client::error::Error as ClientError;
 
 mod funct;
@@ -77,17 +77,14 @@ fn v2_connect_invalid(){
     client.connect("nothing".to_string()).unwrap();
     wait_update_message(&mut client, EthosClientUpdate::Error(ClientError::InvalidConnectionString));
 
-    wait_disconnected(&mut client);
 }
 
 #[test]
 fn v15_server_down(){
     // V15 : Trying to connect when server down should return ServerDown.
-    let mut client = prepare_client(15);
+    let mut client = prepare_client_no_wait(15);
 
     wait_update_message(&mut client, EthosClientUpdate::Error(ClientError::ServerDown));
-
-    wait_disconnected(&mut client);
 
 }
 
@@ -96,8 +93,6 @@ fn v3_connect_valid(){
 
     // V3 : Correct connection string should connect
     let (_server, mut client) = prepare_server_client(3);
-
-    wait_update_message(&mut client, EthosClientUpdate::StatusChanged(EthosClientStatus::Connected));
 
     let duration = Duration::from_millis(500);
     timeloop!{ duration,
@@ -116,7 +111,6 @@ fn v4_connect_invalid_then_valid(){
     // Invalid
     client.connect("nothing".to_string()).unwrap();
     wait_update_message(&mut client, EthosClientUpdate::Error(ClientError::InvalidConnectionString));
-    wait_disconnected(&mut client);
 
     // Valid
     client.connect(connect_string(4)).unwrap();
@@ -127,14 +121,14 @@ fn v4_connect_invalid_then_valid(){
 #[test]
 fn v16_server_down_up() {
     // V16 : ServerDown then server up connection should work.
-    let mut client = prepare_client(16);
+    let mut client = prepare_client_no_wait(16);
 
     wait_update_message(&mut client, EthosClientUpdate::Error(ClientError::ServerDown));
-    wait_disconnected(&mut client);
 
     // Server goes up
-    let _server = prepare_server(16);
+    let mut server = prepare_server(16);
     client.connect(connect_string(16)).unwrap();
+    server.accept();
     wait_update_message(&mut client, EthosClientUpdate::StatusChanged(EthosClientStatus::Connected));
 }
 
@@ -214,6 +208,16 @@ fn v11_server_message_none(){
     // V11 : server_message receive None when no message
     let (_server, mut client) = prepare_server_client(11);
 
+    timeloop!{
+        // Read messages until None
+        match client.message() {
+            Ok(msg) => match msg {
+                Some(_) => {},
+                None => break,
+            },
+            Err(err) => panic!("V11 shouldn't panic! Err={:?}", err),
+        }
+    }
     assert!(client.message().unwrap().is_none());
 }
 
@@ -247,10 +251,6 @@ fn v13_update_join_handle(){
         Ok(_) => {
             wait_update_message(&mut client, EthosClientUpdate::StatusChanged(EthosClientStatus::Disconnected));
             assert_eq!(client.status(), EthosClientStatus::Disconnected);
-            assert!(client.rcv_stoc.is_none());
-            assert!(client.rcv_ttoc.is_none());
-            assert!(client.sdr_ctot.is_none());
-            assert!(client.thread_handle.is_none());
         },
         Err(err) => panic!("Close shouldn't err ({:?})", err),
     }
@@ -280,7 +280,7 @@ fn v17_client_message_too_large() {
 #[test]
 fn v18_update_vec() {
     //V18 : update_vec gives update in a convenient vector.
-    let (_server, mut client) = prepare_server_client(18);
+    let (_server, mut client) = prepare_server_client_no_wait(18);
 
     // Wait for connection messages
     thread::sleep(Duration::from_millis(100));

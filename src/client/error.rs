@@ -58,6 +58,9 @@ pub enum Error {
     ServerMessageReadError(std::io::ErrorKind),
 
     /// Error occurred when retrieving ServerMessage from bytes
-    ServerMessageFromBytesError(CoreError)
+    ServerMessageFromBytesError(CoreError),
+
+    /// Happens when client channels are down. [EthosClient] must be dropped and recreated.
+    ClientChannelDown,
 
 }

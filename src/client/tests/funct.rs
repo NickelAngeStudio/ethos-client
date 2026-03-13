@@ -118,11 +118,6 @@ pub(super) fn wait_client_message(server : &mut UnitTestServer) -> ClientMessage
 
 pub(super) fn wait_disconnected(client : &mut EthosClient) {
      wait_update_message(client, EthosClientUpdate::StatusChanged(EthosClientStatus::Disconnected));
-    // Make sure thread was joined
-    assert!(client.thread_handle.is_none());
-    assert!(client.rcv_ttoc.is_none());
-    assert!(client.rcv_stoc.is_none());
-    assert!(client.sdr_ctot.is_none());
 }
 
 pub(super) fn wait_update_message(client : &mut EthosClient, msg : EthosClientUpdate) {
@@ -152,6 +147,17 @@ pub(super) fn prepare_client(port_minus : u16) -> EthosClient {
 
     let mut client = EthosClient::new();
     client.connect(connect_string).unwrap();
+    wait_update_message(&mut client, EthosClientUpdate::StatusChanged(EthosClientStatus::Connected));
+
+    client
+}
+
+pub(super) fn prepare_client_no_wait(port_minus : u16) -> EthosClient {
+    let connect_string = connect_string(port_minus);
+
+    let mut client = EthosClient::new();
+    client.connect(connect_string).unwrap();
+
     client
 }
 
@@ -160,6 +166,16 @@ pub(super) fn prepare_server_client(port_minus : u16) -> (UnitTestServer, EthosC
     let mut server = prepare_server(port_minus);
     let client = prepare_client(port_minus);
     server.accept();
+    (server, client)
+
+} 
+
+pub(super) fn prepare_server_client_no_wait(port_minus : u16) -> (UnitTestServer, EthosClient) {
+
+    let mut server = prepare_server(port_minus);
+    let client = prepare_client_no_wait(port_minus);
+    server.accept();
+
     (server, client)
 
 } 

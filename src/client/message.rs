@@ -29,11 +29,19 @@ use crate::{Error as ClientError, EthosClientStatus};
 
 /// Client to thread message
 pub enum CtoTMessage {
+
+    /// Open a connection with connect_string
+    OpenConnection(String),
+
     /// Client message to send to the server
     SendMessage(ClientMessage),
 
     /// Tell client to close connection
     CloseConnection,
+
+    /// Tell the client to end the client thread
+    EndClient,
+
 }
 
 /// Update sent to [EthosClient](crate::EthosClient) from communication thread.
