@@ -46,7 +46,7 @@ use std::{thread, time::Duration, u16};
 
 use ethos_core::net::{CLIENT_MSG_MAX_SIZE, ClientMessage, ClientPayload, ServerMessage, ServerPayload};
 
-use crate::{EthosClient, EthosClientStatus, EthosClientUpdate, client::tests::funct::{connect_string, prepare_client, prepare_client_no_wait, prepare_server, prepare_server_client, prepare_server_client_no_wait, wait_client_message, wait_disconnected, wait_server_message, wait_update_message}, timeloop, timeout_loop};
+use crate::{EthosClient, EthosClientStatus, EthosClientUpdate, client::tests::funct::{connect_string, prepare_client_no_wait, prepare_server, prepare_server_client, prepare_server_client_no_wait, wait_client_message, wait_server_message, wait_update_message}, timeloop, timeout_loop};
 use crate::client::error::Error as ClientError;
 
 mod funct;
@@ -92,7 +92,7 @@ fn v15_server_down(){
 fn v3_connect_valid(){
 
     // V3 : Correct connection string should connect
-    let (_server, mut client) = prepare_server_client(3);
+    let (_server, client) = prepare_server_client(3);
 
     let duration = Duration::from_millis(500);
     timeloop!{ duration,

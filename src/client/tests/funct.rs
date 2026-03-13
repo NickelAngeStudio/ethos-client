@@ -115,11 +115,6 @@ pub(super) fn wait_client_message(server : &mut UnitTestServer) -> ClientMessage
     
 }
 
-
-pub(super) fn wait_disconnected(client : &mut EthosClient) {
-     wait_update_message(client, EthosClientUpdate::StatusChanged(EthosClientStatus::Disconnected));
-}
-
 pub(super) fn wait_update_message(client : &mut EthosClient, msg : EthosClientUpdate) {
 
     timeout_loop!{ LOOP_WAIT_UPDATE_TIME,
